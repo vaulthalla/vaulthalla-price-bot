@@ -1,0 +1,21 @@
+{
+  "serviceCode": "AmazonS3",
+  "source": "aws-price-list-fixture",
+  "region": "us-east-1",
+  "currency": "USD",
+  "standard": {
+    "storage_gb_month": "0.023",
+    "put_copy_post_list_1000": "0.005",
+    "get_head_1000": "0.0004",
+    "egress_gb": "0.09"
+  },
+  "standard_ia": {
+    "storage_gb_month": "0.0125",
+    "put_copy_post_list_1000": "0.01",
+    "get_head_1000": "0.001",
+    "retrieval_gb": "0.01",
+    "egress_gb": "0.09",
+    "minimum_storage_duration_days": 30,
+    "minimum_billable_object_size_bytes": 131072
+  }
+}

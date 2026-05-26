@@ -1,0 +1,10 @@
+{
+  "provider_operation_counts": {
+    "PutObject": "1000",
+    "GetObject": "1000"
+  },
+  "storage_byte_hours": {
+    "standard": "3650000000000"
+  },
+  "egress_bytes": "10000000000"
+}

@@ -1,0 +1,110 @@
+{
+  "schema_version": "1.0",
+  "kind": "vaulthalla.rating_profile",
+  "profile_id": "cloudflare-r2/global/standard",
+  "catalog_version": "fixture",
+  "generated_at": "2026-05-26T00:00:00Z",
+  "effective_at": "2026-05-26T00:00:00Z",
+  "provider": {
+    "id": "cloudflare-r2",
+    "display_name": "Cloudflare R2",
+    "api_family": "s3-compatible"
+  },
+  "scope": {
+    "region": "global",
+    "storage_class": "standard",
+    "currency": "USD"
+  },
+  "confidence": {
+    "level": "high",
+    "score": "0.92",
+    "reasons": ["fixture profile"],
+    "unknowns": [
+      "taxes",
+      "enterprise discounts",
+      "account-wide free-tier usage outside Vaulthalla",
+      "promotional credits",
+      "provider invoice rounding"
+    ]
+  },
+  "operation_map": {
+    "ListObjectsV2": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "HeadObject": {"meter_key": "request_class_b", "multiplier": "1", "rules": {}},
+    "GetObject": {"meter_key": "request_class_b", "multiplier": "1", "rules": {}},
+    "PutObject": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "CopyObject": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "CreateMultipartUpload": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "UploadPart": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "UploadPartCopy": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "CompleteMultipartUpload": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "AbortMultipartUpload": {"meter_key": "free_operations", "multiplier": "1", "rules": {}},
+    "DeleteObject": {"meter_key": "free_operations", "multiplier": "1", "rules": {}},
+    "LifecycleTransition": {"meter_key": "request_class_a", "multiplier": "1", "rules": {}},
+    "RestoreObject": {"meter_key": "request_class_b", "multiplier": "1", "rules": {}}
+  },
+  "meters": {
+    "storage": {
+      "meter_key": "storage",
+      "meter_type": "storage_byte_hours",
+      "unit": "byte_hour",
+      "billing_unit": "gb_month",
+      "rounding_rule": "ceil_to_billing_unit",
+      "free_tier_amount": "10",
+      "free_tier_unit": "gb_month",
+      "free_tier_scope": "account_month",
+      "tiers": [{"tier_start": "0", "rate": "0.015", "rate_unit": "gb_month"}],
+      "rules": {}
+    },
+    "request_class_a": {
+      "meter_key": "request_class_a",
+      "meter_type": "request",
+      "unit": "operation",
+      "billing_unit": "million_operations",
+      "rounding_rule": "ceil_to_billing_unit",
+      "free_tier_amount": "1",
+      "free_tier_unit": "million_operations",
+      "free_tier_scope": "account_month",
+      "tiers": [{"tier_start": "0", "rate": "4.50", "rate_unit": "million_operations"}],
+      "rules": {}
+    },
+    "request_class_b": {
+      "meter_key": "request_class_b",
+      "meter_type": "request",
+      "unit": "operation",
+      "billing_unit": "million_operations",
+      "rounding_rule": "ceil_to_billing_unit",
+      "free_tier_amount": "10",
+      "free_tier_unit": "million_operations",
+      "free_tier_scope": "account_month",
+      "tiers": [{"tier_start": "0", "rate": "0.36", "rate_unit": "million_operations"}],
+      "rules": {}
+    },
+    "free_operations": {
+      "meter_key": "free_operations",
+      "meter_type": "request",
+      "unit": "operation",
+      "rounding_rule": "none",
+      "free_tier_scope": "none",
+      "tiers": [{"tier_start": "0", "rate": "0", "rate_unit": "operation"}],
+      "rules": {}
+    },
+    "egress": {
+      "meter_key": "egress",
+      "meter_type": "egress_bytes",
+      "unit": "byte",
+      "billing_unit": "gb",
+      "rounding_rule": "none",
+      "free_tier_scope": "none",
+      "tiers": [{"tier_start": "0", "rate": "0", "rate_unit": "gb"}],
+      "rules": {}
+    }
+  },
+  "storage_rules": [],
+  "known_exclusions": ["taxes", "enterprise discounts"],
+  "provenance": {"source": "test fixture"},
+  "integrity": {
+    "content_sha256": "",
+    "signature_alg": "Ed25519",
+    "signature_ref": ""
+  }
+}
