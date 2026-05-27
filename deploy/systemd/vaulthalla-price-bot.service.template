@@ -1,0 +1,19 @@
+[Unit]
+Description=Vaulthalla Price Bot API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__WORKING_DIRECTORY__
+EnvironmentFile=-__ENV_FILE__
+ExecStart=__GUNICORN__ app:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 127.0.0.1:__PORT__ --access-logfile - --error-logfile -
+Restart=always
+RestartSec=5
+KillSignal=SIGQUIT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

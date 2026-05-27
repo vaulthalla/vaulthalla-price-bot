@@ -36,6 +36,39 @@ price-bot serve --host 127.0.0.1 --port 8080
 
 Live provider fetching is disabled unless `--live` is passed or `PRICE_BOT_LIVE=1`.
 
+## Deployment
+
+The repo includes a bash installer for Debian/Ubuntu hosts. It creates or reuses the
+repo-local `.venv`, installs the package with gunicorn, and can wire systemd,
+nginx, and certbot.
+
+```bash
+make install ARGS="-y --domain prices.example.com --port 8080"
+```
+
+Without `-y`, the installer prompts for which components to install. Component
+flags install only the selected pieces:
+
+```bash
+make install ARGS="--service --port 8080"
+make install ARGS="--nginx --certbot --domain prices.example.com --port 8080"
+```
+
+The generated service runs gunicorn on `127.0.0.1:<port>` as the checkout owner.
+The nginx template proxies the public domain to that local port. If certbot is
+selected, the installer checks for an existing certificate, attempts renewal
+first, then runs certbot's nginx installer with keep-until-expiring behavior.
+
+Remove deployed components with:
+
+```bash
+make uninstall ARGS="-y --domain prices.example.com"
+```
+
+`make uninstall` without `-y` prompts before removing the service, nginx site,
+and certificate. The uninstaller does not remove `.env`, `.venv`, `.secrets`,
+`data/`, or `public/`.
+
 ## Vaulthalla consumption model
 
 Vaulthalla should fetch `public/v1/manifest.json`, verify `manifest.json.sig` with the exported Ed25519 public key, then fetch only the profile JSON files it needs. Each profile is deterministic JSON with decimal strings for rates and includes confidence, provenance, known exclusions, and a content hash.
