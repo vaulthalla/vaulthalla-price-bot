@@ -12,7 +12,7 @@ from sqlalchemy import text
 from price_bot.config import load_settings
 from price_bot.db.store import Store
 from price_bot.normalizer.estimator import estimate_cost
-from price_bot.normalizer.models import RatingProfile, UsageInput
+from price_bot.normalizer.models import EstimateOptions, RatingProfile, UsageInput
 from price_bot.providers import all_fetchers
 
 router = APIRouter()
@@ -117,6 +117,7 @@ class EstimateRequest(BaseModel):
     region: str | None = None
     storage_class: str | None = None
     usage: UsageInput = Field(default_factory=UsageInput)
+    options: EstimateOptions | None = None
 
 
 @router.post("/v1/estimate")
@@ -132,7 +133,7 @@ def estimate(request: EstimateRequest) -> dict[str, Any]:
         rating_profile = RatingProfile.model_validate(
             profile(request.provider, request.region, request.storage_class)
         )
-    return estimate_cost(rating_profile, request.usage).model_dump(mode="json")
+    return estimate_cost(rating_profile, request.usage, request.options).model_dump(mode="json")
 
 
 @router.get("/v1/artifacts")

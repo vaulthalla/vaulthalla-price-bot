@@ -6,6 +6,7 @@ from pathlib import Path
 
 from price_bot.normalizer.models import (
     EstimateBreakdown,
+    EstimateOptions,
     EstimateResult,
     Meter,
     RatingProfile,
@@ -20,18 +21,35 @@ from price_bot.normalizer.units import (
     normalize_quantity,
 )
 
+FREE_TIER_POLICY_APPLY = "apply_free_tiers"
+FREE_TIER_POLICY_IGNORE_ACCOUNT_WIDE = "ignore_account_wide_free_tiers"
+CONSERVATIVE_FREE_TIER_UNKNOWN = (
+    "account-level free tiers intentionally ignored for budget-safe estimate"
+)
 
-def estimate_from_files(profile_path: Path, usage_path: Path) -> EstimateResult:
+
+def estimate_from_files(
+    profile_path: Path,
+    usage_path: Path,
+    options: EstimateOptions | None = None,
+) -> EstimateResult:
     profile = RatingProfile.model_validate(json.loads(profile_path.read_text()))
     usage = UsageInput.model_validate(json.loads(usage_path.read_text()))
-    return estimate_cost(profile, usage)
+    return estimate_cost(profile, usage, options)
 
 
-def estimate_cost(profile: RatingProfile, usage: UsageInput) -> EstimateResult:
+def estimate_cost(
+    profile: RatingProfile,
+    usage: UsageInput,
+    options: EstimateOptions | None = None,
+) -> EstimateResult:
     breakdown: list[EstimateBreakdown] = []
     free_tier_applied: dict[str, Decimal] = {}
     rounding_applied: dict[str, str] = {}
     unknowns = list(profile.confidence.unknowns)
+    estimate_mode, apply_free_tiers, free_tier_policy = _resolve_estimate_options(options)
+    if not apply_free_tiers:
+        unknowns.append(CONSERVATIVE_FREE_TIER_UNKNOWN)
 
     storage_gb_month_for_egress = Decimal("0")
 
@@ -47,13 +65,18 @@ def estimate_cost(profile: RatingProfile, usage: UsageInput) -> EstimateResult:
         notes: list[str] = []
         quantity = _apply_meter_minimums(profile, meter, quantity, usage, notes)
         billable = _apply_egress_inclusion(meter, quantity, storage_gb_month_for_egress, notes)
-        if meter.free_tier_amount is not None:
+        if apply_free_tiers and meter.free_tier_amount is not None:
             before = billable
             billable = max(Decimal("0"), billable - meter.free_tier_amount)
             applied = before - billable
             if applied > 0:
                 free_tier_applied[meter.meter_key] = applied
                 notes.append(f"free tier applied: {applied} {meter.free_tier_unit or meter.billing_unit}")
+        elif not apply_free_tiers and meter.free_tier_amount is not None:
+            notes.append(
+                "free tier ignored for budget safety: "
+                f"{meter.free_tier_amount} {meter.free_tier_unit or meter.billing_unit}"
+            )
 
         rounded = apply_rounding(billable, meter.rounding_rule)
         if rounded != billable:
@@ -87,7 +110,7 @@ def estimate_cost(profile: RatingProfile, usage: UsageInput) -> EstimateResult:
             continue
         notes = []
         billable = quantity
-        if meter.free_tier_amount is not None:
+        if apply_free_tiers and meter.free_tier_amount is not None:
             free_amount = _free_tier_operations(meter)
             before = billable
             billable = max(Decimal("0"), billable - free_amount)
@@ -95,6 +118,11 @@ def estimate_cost(profile: RatingProfile, usage: UsageInput) -> EstimateResult:
             if applied > 0:
                 free_tier_applied[meter_key] = free_tier_applied.get(meter_key, Decimal("0")) + applied
                 notes.append(f"free tier applied: {applied} operations")
+        elif not apply_free_tiers and meter.free_tier_amount is not None:
+            notes.append(
+                "free tier ignored for budget safety: "
+                f"{_free_tier_operations(meter)} operations"
+            )
         tier = meter.tiers[0]
         normalized = _rate_quantity(billable, tier.rate_unit)
         rounded = apply_rounding(normalized, meter.rounding_rule)
@@ -141,12 +169,25 @@ def estimate_cost(profile: RatingProfile, usage: UsageInput) -> EstimateResult:
     return EstimateResult(
         estimated_cost=total.quantize(Decimal("0.00000001")),
         currency=profile.scope.currency,
+        estimate_mode=estimate_mode,
+        free_tier_policy=free_tier_policy,
+        free_tiers_applied=bool(free_tier_applied),
         breakdown=breakdown,
         free_tier_applied=free_tier_applied,
         rounding_applied=rounding_applied,
         confidence=profile.confidence,
         unknowns=sorted(set(unknowns)),
     )
+
+
+def _resolve_estimate_options(options: EstimateOptions | None) -> tuple[str, bool, str]:
+    resolved = options or EstimateOptions()
+    budget_conservative = (
+        resolved.mode == "budget_conservative" or resolved.apply_free_tiers is False
+    )
+    if budget_conservative:
+        return "budget_conservative", False, FREE_TIER_POLICY_IGNORE_ACCOUNT_WIDE
+    return "reporting", True, FREE_TIER_POLICY_APPLY
 
 
 def _quantity_for_meter(profile: RatingProfile, meter: Meter, usage: UsageInput) -> Decimal:

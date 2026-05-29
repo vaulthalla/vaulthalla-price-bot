@@ -180,6 +180,32 @@ def test_existing_api_routes_and_manifest_validation_still_work(
     assert profile_response.status_code == 200
     assert profile_response.json()["profile_id"] == "cloudflare-r2/global/standard"
 
+    reporting_estimate = client.post(
+        "/v1/estimate",
+        json={
+            "profile": profile_response.json(),
+            "usage": {"storage_byte_hours": {"standard": "3650000000000"}},
+        },
+    )
+    assert reporting_estimate.status_code == 200
+    assert reporting_estimate.json()["estimate_mode"] == "reporting"
+    assert reporting_estimate.json()["free_tier_policy"] == "apply_free_tiers"
+    assert reporting_estimate.json()["estimated_cost"] in {"0E-8", "0.00000000"}
+
+    conservative_estimate = client.post(
+        "/v1/estimate",
+        json={
+            "profile": profile_response.json(),
+            "usage": {"storage_byte_hours": {"standard": "3650000000000"}},
+            "options": {"mode": "budget_conservative", "apply_free_tiers": False},
+        },
+    )
+    assert conservative_estimate.status_code == 200
+    assert conservative_estimate.json()["estimate_mode"] == "budget_conservative"
+    assert conservative_estimate.json()["free_tier_policy"] == "ignore_account_wide_free_tiers"
+    assert conservative_estimate.json()["free_tiers_applied"] is False
+    assert conservative_estimate.json()["estimated_cost"] != reporting_estimate.json()["estimated_cost"]
+
     validate_manifest(published_artifacts["manifest_path"], load_settings())
 
 

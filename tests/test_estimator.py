@@ -4,7 +4,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from price_bot.normalizer.estimator import estimate_cost, estimate_from_files
-from price_bot.normalizer.models import RatingProfile, UsageInput
+from price_bot.normalizer.models import EstimateOptions, RatingProfile, UsageInput
 from price_bot.normalizer.units import BILLING_MONTH_HOURS, GB, GIB, TB
 from price_bot.providers import all_fetchers
 
@@ -30,7 +30,66 @@ def test_r2_standard_free_tier_example() -> None:
         ),
     )
     assert result.estimated_cost == Decimal("0E-8")
+    assert result.estimate_mode == "reporting"
+    assert result.free_tier_policy == "apply_free_tiers"
+    assert result.free_tiers_applied is True
     assert result.free_tier_applied["storage"] == Decimal("5")
+
+
+def test_r2_standard_reporting_mode_applies_free_tiers() -> None:
+    result = estimate_cost(
+        profile("cloudflare-r2", "standard"),
+        UsageInput(storage_byte_hours={"standard": Decimal("5") * GB * BILLING_MONTH_HOURS}),
+        EstimateOptions(mode="reporting"),
+    )
+    assert result.estimated_cost == Decimal("0E-8")
+    assert result.estimate_mode == "reporting"
+    assert result.free_tier_policy == "apply_free_tiers"
+    assert result.free_tier_applied["storage"] == Decimal("5")
+
+
+def test_r2_standard_budget_conservative_ignores_free_tiers() -> None:
+    reporting = estimate_cost(
+        profile("cloudflare-r2", "standard"),
+        UsageInput(
+            provider_operation_counts={"PutObject": Decimal("1000"), "GetObject": Decimal("1000")},
+            storage_byte_hours={"standard": Decimal("5") * GB * BILLING_MONTH_HOURS},
+        ),
+        EstimateOptions(mode="reporting"),
+    )
+    conservative = estimate_cost(
+        profile("cloudflare-r2", "standard"),
+        UsageInput(
+            provider_operation_counts={"PutObject": Decimal("1000"), "GetObject": Decimal("1000")},
+            storage_byte_hours={"standard": Decimal("5") * GB * BILLING_MONTH_HOURS},
+        ),
+        EstimateOptions(mode="budget_conservative"),
+    )
+
+    assert reporting.estimated_cost == Decimal("0E-8")
+    assert conservative.estimated_cost > reporting.estimated_cost
+    assert conservative.estimate_mode == "budget_conservative"
+    assert conservative.free_tier_policy == "ignore_account_wide_free_tiers"
+    assert conservative.free_tiers_applied is False
+    assert conservative.free_tier_applied == {}
+    assert "account-level free tiers intentionally ignored for budget-safe estimate" in conservative.unknowns
+    assert any(
+        "free tier ignored for budget safety" in note
+        for item in conservative.breakdown
+        for note in item.notes
+    )
+
+
+def test_apply_free_tiers_false_selects_conservative_policy() -> None:
+    result = estimate_cost(
+        profile("cloudflare-r2", "standard"),
+        UsageInput(storage_byte_hours={"standard": Decimal("5") * GB * BILLING_MONTH_HOURS}),
+        EstimateOptions(apply_free_tiers=False),
+    )
+    assert result.estimated_cost == Decimal("0.07500000")
+    assert result.estimate_mode == "budget_conservative"
+    assert result.free_tier_policy == "ignore_account_wide_free_tiers"
+    assert result.free_tiers_applied is False
 
 
 def test_r2_ia_retrieval_and_minimum_duration_penalty() -> None:

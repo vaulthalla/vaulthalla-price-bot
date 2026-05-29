@@ -127,6 +127,11 @@ class UsageInput(DecimalModel):
     early_delete_gb_days: dict[str, Decimal] = Field(default_factory=dict)
 
 
+class EstimateOptions(DecimalModel):
+    apply_free_tiers: bool = True
+    mode: Literal["reporting", "budget_conservative"] | None = None
+
+
 class EstimateBreakdown(DecimalModel):
     meter_key: str
     quantity: Decimal
@@ -141,6 +146,9 @@ class EstimateBreakdown(DecimalModel):
 class EstimateResult(DecimalModel):
     estimated_cost: Decimal
     currency: str
+    estimate_mode: Literal["reporting", "budget_conservative"] = "reporting"
+    free_tier_policy: str = "apply_free_tiers"
+    free_tiers_applied: bool = False
     breakdown: list[EstimateBreakdown]
     free_tier_applied: dict[str, Decimal] = Field(default_factory=dict)
     rounding_applied: dict[str, str] = Field(default_factory=dict)
