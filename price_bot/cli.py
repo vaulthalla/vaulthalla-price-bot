@@ -116,6 +116,30 @@ def publish(
     console.print(f"[green]Published[/green] {manifest.profile_count} profiles to {out}")
 
 
+@app.command("mirror-artifacts")
+def mirror_artifacts_command(
+    out: Annotated[Path, typer.Option(help="Output directory for mirrored public v1 artifacts.")],
+    source: Annotated[
+        Path | None,
+        typer.Option(help="Source public v1 artifact directory. Defaults to PRICE_BOT_PUBLIC_DIR."),
+    ] = None,
+    include_public_key: Annotated[
+        bool,
+        typer.Option(help="Copy the configured public key as public-key.pem."),
+    ] = False,
+) -> None:
+    from price_bot.publish.artifacts import mirror_artifacts
+
+    settings = load_settings()
+    mirror_artifacts(
+        source or settings.public_dir,
+        out,
+        settings,
+        include_public_key=include_public_key,
+    )
+    console.print(f"[green]Mirrored[/green] signed artifacts to {out}")
+
+
 @app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Bind host.")] = "127.0.0.1",

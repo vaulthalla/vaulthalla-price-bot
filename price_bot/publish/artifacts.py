@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import zstandard as zstd
@@ -126,6 +127,37 @@ def validate_manifest(manifest_path: Path, settings: Settings) -> None:
         (base / manifest.full_catalog["signature"]).read_text().strip(),
         settings,
     )
+
+
+def mirror_artifacts(
+    source: Path,
+    out: Path,
+    settings: Settings,
+    *,
+    include_public_key: bool = False,
+) -> None:
+    source = source.resolve()
+    out = out.resolve()
+    if not (source / "manifest.json").exists():
+        raise FileNotFoundError(f"Published artifact manifest not found: {source / 'manifest.json'}")
+    if source == out:
+        validate_manifest(out / "manifest.json", settings)
+        return
+
+    out.mkdir(parents=True, exist_ok=True)
+    for name in ["manifest.json", "manifest.json.sig"]:
+        shutil.copy2(source / name, out / name)
+    for dirname in ["profiles", "schemas", "catalog"]:
+        src = source / dirname
+        if src.exists():
+            shutil.copytree(src, out / dirname, dirs_exist_ok=True)
+
+    if include_public_key:
+        public_key = settings.signing_public_key_path
+        if public_key.exists():
+            shutil.copy2(public_key, out / "public-key.pem")
+
+    validate_manifest(out / "manifest.json", settings)
 
 
 def _profile_relpath(profile: RatingProfile) -> str:

@@ -12,7 +12,7 @@ from price_bot.api.main import create_app
 from price_bot.config import load_settings
 from price_bot.normalizer.models import Manifest, ManifestProfileRef
 from price_bot.normalizer.rating_profile import stable_json_bytes
-from price_bot.publish.artifacts import validate_manifest
+from price_bot.publish.artifacts import mirror_artifacts, validate_manifest
 from price_bot.publish.signing import write_signature
 
 PROFILE_FIXTURE = Path("tests/fixtures/profiles/r2-standard.json")
@@ -207,6 +207,30 @@ def test_existing_api_routes_and_manifest_validation_still_work(
     assert conservative_estimate.json()["estimated_cost"] != reporting_estimate.json()["estimated_cost"]
 
     validate_manifest(published_artifacts["manifest_path"], load_settings())
+
+
+def test_mirror_artifacts_copies_signed_public_bytes_without_private_key(
+    published_artifacts: dict[str, Path],
+    tmp_path: Path,
+) -> None:
+    mirror_dir = tmp_path / "mirror" / "v1"
+    settings = load_settings()
+
+    mirror_artifacts(
+        published_artifacts["public_dir"],
+        mirror_dir,
+        settings,
+        include_public_key=True,
+    )
+
+    for source_path in published_artifacts["public_dir"].rglob("*"):
+        if source_path.is_file():
+            mirrored = mirror_dir / source_path.relative_to(published_artifacts["public_dir"])
+            assert mirrored.read_bytes() == source_path.read_bytes()
+
+    validate_manifest(mirror_dir / "manifest.json", settings)
+    assert (mirror_dir / "public-key.pem").read_bytes() == published_artifacts["public_key_path"].read_bytes()
+    assert not any(path.name.endswith(".key") for path in mirror_dir.rglob("*"))
 
 
 def test_public_key_returns_404_when_key_file_is_missing(
