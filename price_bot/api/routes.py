@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -15,6 +16,33 @@ from price_bot.normalizer.models import RatingProfile, UsageInput
 from price_bot.providers import all_fetchers
 
 router = APIRouter()
+
+
+def _file_response(path: Path, *, media_type: str, missing_detail: str) -> FileResponse:
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail=missing_detail)
+    return FileResponse(path, media_type=media_type)
+
+
+def _safe_artifact_segment(value: str) -> str:
+    if (
+        not value
+        or "/" in value
+        or "\\" in value
+        or ".." in value
+        or any(ord(char) < 32 or ord(char) == 127 for char in value)
+    ):
+        raise HTTPException(status_code=400, detail="unsafe artifact path component")
+    return value
+
+
+def _profile_artifact_path(
+    provider: str, region: str, storage_class: str, suffix: str = ".json"
+) -> Path:
+    provider = _safe_artifact_segment(provider)
+    region = _safe_artifact_segment(region)
+    storage_class = _safe_artifact_segment(storage_class)
+    return load_settings().public_dir / "profiles" / provider / region / f"{storage_class}{suffix}"
 
 
 @router.get("/health")
@@ -105,6 +133,96 @@ def estimate(request: EstimateRequest) -> dict[str, Any]:
             profile(request.provider, request.region, request.storage_class)
         )
     return estimate_cost(rating_profile, request.usage).model_dump(mode="json")
+
+
+@router.get("/v1/artifacts")
+def artifact_index() -> dict[str, Any]:
+    return {
+        "manifest": "/v1/artifacts/manifest.json",
+        "manifest_signature": "/v1/artifacts/manifest.json.sig",
+        "full_catalog": "/v1/artifacts/catalog/full.json.zst",
+        "full_catalog_signature": "/v1/artifacts/catalog/full.json.zst.sig",
+        "schemas": {
+            "manifest_v1": "/v1/artifacts/schemas/manifest-v1.schema.json",
+            "rating_profile_v1": "/v1/artifacts/schemas/rating-profile-v1.schema.json",
+        },
+        "public_key": "/v1/public-key",
+    }
+
+
+@router.get("/v1/artifacts/manifest.json")
+def manifest_artifact() -> FileResponse:
+    return _file_response(
+        load_settings().public_dir / "manifest.json",
+        media_type="application/json",
+        missing_detail="manifest artifact not published",
+    )
+
+
+@router.get("/v1/artifacts/manifest.json.sig")
+def manifest_signature_artifact() -> FileResponse:
+    return _file_response(
+        load_settings().public_dir / "manifest.json.sig",
+        media_type="text/plain",
+        missing_detail="manifest signature not published",
+    )
+
+
+@router.get("/v1/artifacts/profiles/{provider}/{region}/{storage_class}.json")
+def profile_artifact(provider: str, region: str, storage_class: str) -> FileResponse:
+    return _file_response(
+        _profile_artifact_path(provider, region, storage_class),
+        media_type="application/json",
+        missing_detail="profile artifact not found",
+    )
+
+
+@router.get("/v1/artifacts/profiles/{provider}/{region}/{storage_class}.json.sig")
+def profile_signature_artifact(provider: str, region: str, storage_class: str) -> FileResponse:
+    return _file_response(
+        _profile_artifact_path(provider, region, storage_class, suffix=".json.sig"),
+        media_type="text/plain",
+        missing_detail="profile signature not found",
+    )
+
+
+@router.get("/v1/artifacts/schemas/{schema_name}")
+def schema_artifact(schema_name: str) -> FileResponse:
+    schema_name = _safe_artifact_segment(schema_name)
+    if not schema_name.endswith(".schema.json"):
+        raise HTTPException(status_code=400, detail="unsupported schema artifact")
+    return _file_response(
+        load_settings().public_dir / "schemas" / schema_name,
+        media_type="application/schema+json",
+        missing_detail="schema artifact not found",
+    )
+
+
+@router.get("/v1/artifacts/catalog/full.json.zst")
+def full_catalog_artifact() -> FileResponse:
+    return _file_response(
+        load_settings().public_dir / "catalog" / "full.json.zst",
+        media_type="application/zstd+json",
+        missing_detail="full catalog not published",
+    )
+
+
+@router.get("/v1/artifacts/catalog/full.json.zst.sig")
+def full_catalog_signature_artifact() -> FileResponse:
+    return _file_response(
+        load_settings().public_dir / "catalog" / "full.json.zst.sig",
+        media_type="text/plain",
+        missing_detail="full catalog signature not published",
+    )
+
+
+@router.get("/v1/public-key")
+def public_key() -> FileResponse:
+    return _file_response(
+        load_settings().signing_public_key_path,
+        media_type="text/plain",
+        missing_detail="signing public key not configured",
+    )
 
 
 @router.get("/v1/providers")
