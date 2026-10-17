@@ -18,7 +18,7 @@ from price_bot.providers.aws_offer import (
     extract_region_prices,
     parse_payload,
 )
-from price_bot.providers.aws_s3 import CURATED_PRICES, AwsS3Fetcher
+from price_bot.providers.aws_s3 import CURATED_PRICES, VERSIONING_OPERATIONS, AwsS3Fetcher
 from price_bot.scrape.http import PriceBotHttpClient
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -207,7 +207,10 @@ def test_aws_profiles_keep_legacy_shape(source: str) -> None:
         for operation, meter_key in LEGACY_OPERATION_MAP.items():
             assert profile.operation_map[operation].meter_key == meter_key
             assert profile.operation_map[operation].multiplier == Decimal("1")
-        assert set(profile.operation_map) == set(LEGACY_OPERATION_MAP)
+        for operation, meter_key in VERSIONING_OPERATIONS.items():
+            assert profile.operation_map[operation].meter_key == meter_key
+            assert meter_key in profile.meters
+        assert set(profile.operation_map) == set(LEGACY_OPERATION_MAP) | set(VERSIONING_OPERATIONS)
         if profile.scope.region == "us-east-1":
             rates = {key: str(item.tiers[0].rate) for key, item in profile.meters.items() if key != "free_operations"}
             assert rates == LEGACY_US_EAST_1_RATES[storage_class]

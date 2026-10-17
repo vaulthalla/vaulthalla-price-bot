@@ -144,6 +144,7 @@ def estimate_cost(
         )
 
     _append_early_delete_penalties(profile, usage, breakdown)
+    _append_noncurrent_storage(profile, usage, breakdown, unknowns)
 
     total = sum((item.cost for item in breakdown), Decimal("0"))
     minimum_monthly = profile.provenance.get("minimum_monthly_usd")
@@ -311,6 +312,59 @@ def _rate_quantity(quantity: Decimal, rate_unit: str) -> Decimal:
             return quantity / Decimal("1000000")
         case _:
             return quantity
+
+
+def _append_noncurrent_storage(
+    profile: RatingProfile,
+    usage: UsageInput,
+    breakdown: list[EstimateBreakdown],
+    unknowns: list[str],
+) -> None:
+    """Price noncurrent object versions at the class storage rate (first tier, no free tier).
+
+    Only runs when the caller sends ``noncurrent_storage_byte_hours``; inputs without it are
+    estimated exactly as before.
+    """
+    if not usage.noncurrent_storage_byte_hours:
+        return
+    byte_hours = usage.noncurrent_storage_byte_hours.get(
+        profile.scope.storage_class,
+        usage.noncurrent_storage_byte_hours.get("default", Decimal("0")),
+    )
+    if byte_hours == 0:
+        return
+    versioning = profile.versioning
+    if versioning is None or not versioning.supported:
+        status = versioning.status if versioning is not None else "absent"
+        unknowns.append(
+            f"noncurrent version storage reported but profile versioning status is {status}; "
+            "not priced"
+        )
+        return
+    if versioning.noncurrent_storage_billing != "storage_class_rate":
+        unknowns.append(
+            "noncurrent version storage billing "
+            f"{versioning.noncurrent_storage_billing!r} not understood; not priced"
+        )
+        return
+    storage_meter = profile.meters.get("storage")
+    if storage_meter is None or not storage_meter.tiers:
+        unknowns.append("noncurrent version storage reported but profile has no storage meter")
+        return
+    quantity = normalize_quantity(byte_hours, storage_meter.billing_unit)
+    tier = storage_meter.tiers[0]
+    breakdown.append(
+        EstimateBreakdown(
+            meter_key="noncurrent_storage",
+            quantity=quantity,
+            billable_quantity=quantity,
+            unit=storage_meter.billing_unit or storage_meter.unit,
+            rate=tier.rate,
+            rate_unit=tier.rate_unit,
+            cost=_rate_quantity(quantity, tier.rate_unit) * tier.rate,
+            notes=["noncurrent object versions billed at the storage class rate"],
+        )
+    )
 
 
 def _append_early_delete_penalties(

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from price_bot.normalizer.models import RatingProfile
+from price_bot.normalizer.models import RatingProfile, VersioningCapability
 from price_bot.normalizer.rating_profile import (
     base_profile,
     meter,
@@ -107,6 +107,70 @@ CURATED_PRICES: dict[str, Any] = {
         },
     },
 }
+
+VERSIONING_DOC_URLS = [
+    "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html",
+    "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html",
+    "https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-expire-general-considerations.html",
+    STORAGE_CLASS_DOC_URL,
+    PRICING_PAGE_URL,
+]
+
+VERSIONING_NOTES = [
+    "Noncurrent versions are billed at the storage rate of their storage class.",
+    "Each version is a full copy of the object, not a diff: three stored versions bill as three objects.",
+    "Delete markers are billed as storage equal to the UTF-8 byte length of their key name.",
+    "DELETE requests are free, including deletes of a specific version.",
+    "Lifecycle expiration (including NoncurrentVersionExpiration) is not charged as a request, "
+    "and expired objects stop accruing storage.",
+    "Once enabled, versioning can only be suspended, never disabled; existing versions keep "
+    "billing while suspended.",
+    "LIST requests (including ListObjectVersions) are billed at the S3 Standard "
+    "PUT/COPY/POST/LIST rate regardless of storage class.",
+]
+
+# Additive operation keys only: daemons that predate versioning support never send these, so
+# they cannot change existing estimates.
+VERSIONING_OPERATIONS = {
+    "ListObjectVersions": "request_write",
+    "GetObjectVersion": "request_read",
+    "HeadObjectVersion": "request_read",
+    "CopyObjectVersion": "request_write",
+    "PutBucketVersioning": "request_write",
+    "GetBucketVersioning": "request_read",
+    "DeleteObjectVersion": "free_operations",
+}
+
+
+def aws_versioning(storage_class: str) -> VersioningCapability:
+    minimums = DOCUMENTED_MINIMUMS[storage_class]
+    notes = list(VERSIONING_NOTES)
+    if minimums["minimum_storage_duration_days"]:
+        notes.append(
+            "Noncurrent versions in this class are subject to the "
+            f"{minimums['minimum_storage_duration_days']}-day minimum storage duration and the "
+            f"{minimums['minimum_billable_object_size_bytes']}-byte minimum billable object "
+            "size; expiring or deleting a version early bills the remaining days."
+        )
+        notes.append(
+            "This profile maps ListObjectVersions and ListObjectsV2 to this class's "
+            "PUT/COPY/POST/LIST rate, which over-estimates LIST cost (AWS bills LIST at the "
+            "S3 Standard rate)."
+        )
+    return VersioningCapability(
+        supported=True,
+        status="supported",
+        noncurrent_storage_billing="storage_class_rate",
+        delete_marker_billing="key_name_bytes",
+        noncurrent_expiration_lifecycle=True,
+        lifecycle_expiration_request_charge=False,
+        minimum_storage_duration_days=minimums["minimum_storage_duration_days"],
+        minimum_billable_object_size_bytes=minimums["minimum_billable_object_size_bytes"],
+        irreversible_enable=True,
+        documentation_urls=list(VERSIONING_DOC_URLS),
+        notes=notes,
+    )
+
 
 class AwsS3Fetcher(ProviderFetcher):
     provider_key = "aws-s3"
@@ -237,6 +301,7 @@ class AwsS3Fetcher(ProviderFetcher):
                 "minimum storage duration and object size are documented constants",
             ],
             provenance=provenance,
+            versioning=aws_versioning(storage_class),
         )
         storage_meter = meter(
             "storage",
@@ -292,6 +357,7 @@ class AwsS3Fetcher(ProviderFetcher):
             # (transitions into S3 Standard do not exist), so the mapping is left as is.
             "LifecycleTransition": op_map("request_write"),
             "RestoreObject": op_map("request_write"),
+            **{op: op_map(meter_key) for op, meter_key in VERSIONING_OPERATIONS.items()},
         }
         if minimums["minimum_storage_duration_days"] or minimums["minimum_billable_object_size_bytes"]:
             profile.storage_rules = [

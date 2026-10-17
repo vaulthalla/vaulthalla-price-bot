@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from price_bot.normalizer.rating_profile import base_profile, meter, op_map, storage_rule
+from price_bot.normalizer.models import VersioningCapability
+from price_bot.normalizer.rating_profile import (
+    base_profile,
+    meter,
+    op_map,
+    storage_rule,
+    unsupported_versioning,
+)
 from price_bot.providers.base import ProviderFetcher, SourceDefinition
 from price_bot.scrape.parse import decimal_after, require_phrases
 
@@ -17,6 +24,26 @@ R2 Infrequent Access retrieval is $0.01 / GB.
 Egress is free. Cloudflare rounds up to the next billing unit.
 DeleteObject and AbortMultipartUpload are free.
 """
+
+R2_S3_API_DOC_URL = "https://developers.cloudflare.com/r2/api/s3/api/"
+
+
+def r2_versioning() -> VersioningCapability:
+    # Verified 2026-10-16 against the R2 S3 API compatibility page (last updated 2026-10-14):
+    # GetBucketVersioning and PutBucketVersioning are marked unimplemented, ListObjectVersions is
+    # not listed, and GetObject documents no versionId parameter.
+    return unsupported_versioning(
+        "Cloudflare R2 does not implement S3 object versioning "
+        "(PutBucketVersioning/ListObjectVersions)",
+        [R2_S3_API_DOC_URL],
+        notes=[
+            "The R2 S3 API compatibility page lists GetBucketVersioning and PutBucketVersioning "
+            "as unimplemented and does not list ListObjectVersions or a versionId parameter on "
+            "GetObject.",
+            "Overwrites and deletes on R2 replace or remove the only copy; there are no "
+            "noncurrent versions or delete markers to bill.",
+        ],
+    )
 
 
 class CloudflareR2Fetcher(ProviderFetcher):
@@ -103,6 +130,7 @@ class CloudflareR2Fetcher(ProviderFetcher):
             confidence_score="0.92",
             confidence_reasons=["official docs markdown/html parser sentinels passed"],
             provenance={"source": "Cloudflare R2 pricing docs"},
+            versioning=r2_versioning(),
         )
         profile.meters = {
             "storage": meter(
