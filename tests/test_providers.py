@@ -21,7 +21,7 @@ def test_all_provider_fixture_parsers_build_profiles() -> None:
             assert profile.provenance["source_snapshot_sha256"] == "abc123"
 
     assert profile_counts == {
-        "aws-s3": 2,
+        "aws-s3": 10,
         "cloudflare-r2": 2,
         "wasabi": 1,
         "backblaze-b2": 2,

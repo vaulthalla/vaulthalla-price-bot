@@ -11,13 +11,18 @@ from price_bot.providers import all_fetchers
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "providers"
 
 
-def profile(provider_key: str, storage_class: str) -> RatingProfile:
+def profile(provider_key: str, storage_class: str, region: str | None = None) -> RatingProfile:
     fetcher = next(item for item in all_fetchers() if item.provider_key == provider_key)
     source = fetcher.sources()[0]
     profiles = fetcher.build_profiles(
         (FIXTURE_DIR / source.fixture_name).read_bytes(), "test-catalog", "abc123"
     )
-    return next(item for item in profiles if item.scope.storage_class == storage_class)
+    return next(
+        item
+        for item in profiles
+        if item.scope.storage_class == storage_class
+        and (region is None or item.scope.region == region)
+    )
 
 
 def test_r2_standard_free_tier_example() -> None:
@@ -180,7 +185,7 @@ def test_wasabi_storage_only() -> None:
 
 def test_aws_s3_basic_standard_request_storage_fixture() -> None:
     result = estimate_cost(
-        profile("aws-s3", "standard"),
+        profile("aws-s3", "standard", "us-east-1"),
         UsageInput(
             storage_byte_hours={"standard": Decimal("100") * GB * BILLING_MONTH_HOURS},
             provider_operation_counts={"PutObject": Decimal("1000"), "GetObject": Decimal("1000")},
@@ -191,7 +196,7 @@ def test_aws_s3_basic_standard_request_storage_fixture() -> None:
 
 def test_aws_ia_min_object_and_min_duration_fixture() -> None:
     result = estimate_cost(
-        profile("aws-s3", "standard-ia"),
+        profile("aws-s3", "standard-ia", "us-east-1"),
         UsageInput(
             storage_byte_hours={"standard-ia": Decimal("1")},
             object_count_hours={"standard-ia": Decimal("730")},
