@@ -69,6 +69,29 @@ class StorageRule(DecimalModel):
     retrieval_rule: dict[str, Any] | None = None
 
 
+class VersioningCapability(DecimalModel):
+    """Additive, provider-level description of S3 object versioning cost semantics.
+
+    Consumers (the Vaulthalla daemon) read this block to price noncurrent versions and delete
+    markers locally. ``supported`` is the only key that is always present. ``status`` separates
+    "the provider does not implement versioning" (``unsupported``) from "price-bot has not
+    verified this provider's versioning billing" (``unverified``); both carry ``supported=false``.
+    """
+
+    supported: bool
+    status: Literal["supported", "unsupported", "unverified"]
+    reason: str | None = None
+    noncurrent_storage_billing: str | None = None
+    delete_marker_billing: str | None = None
+    noncurrent_expiration_lifecycle: bool | None = None
+    lifecycle_expiration_request_charge: bool | None = None
+    minimum_storage_duration_days: int | None = None
+    minimum_billable_object_size_bytes: int | None = None
+    irreversible_enable: bool | None = None
+    documentation_urls: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class RatingProfile(DecimalModel):
     schema_version: str = "1.0"
     kind: Literal["vaulthalla.rating_profile"] = "vaulthalla.rating_profile"
@@ -85,6 +108,7 @@ class RatingProfile(DecimalModel):
     storage_rules: list[StorageRule] = Field(default_factory=list)
     known_exclusions: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] = Field(default_factory=dict)
+    versioning: VersioningCapability | None = None
     integrity: Integrity = Field(default_factory=Integrity)
 
 
@@ -125,6 +149,7 @@ class UsageInput(DecimalModel):
     egress_bytes: Decimal = Decimal("0")
     object_count: Decimal = Decimal("0")
     early_delete_gb_days: dict[str, Decimal] = Field(default_factory=dict)
+    noncurrent_storage_byte_hours: dict[str, Decimal] = Field(default_factory=dict)
 
 
 class EstimateOptions(DecimalModel):

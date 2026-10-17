@@ -35,6 +35,7 @@ from price_bot.normalizer.models import (
     RateTier,
     RatingProfile,
     StorageRule,
+    VersioningCapability,
 )
 from price_bot.normalizer.rating_profile import finalize_profile_integrity, utc_now_iso
 
@@ -226,11 +227,19 @@ class Store:
                 confidence_score=profile.confidence.score,
                 profile_sha256=profile.integrity.content_sha256,
                 source_snapshot_sha256=profile.provenance.get("source_snapshot_sha256"),
+                # Profile-level fields without their own columns ride in the provenance JSON blob
+                # (create_all never ALTERs existing tables) and are popped back out in
+                # profile_from_row. Anything not stored here is silently dropped at publish.
                 provenance={
                     **profile.provenance,
                     "confidence": profile.confidence.model_dump(mode="json"),
                     "known_exclusions": profile.known_exclusions,
                     "generated_at": profile.generated_at,
+                    **(
+                        {"versioning": profile.versioning.model_dump(mode="json", exclude_none=True)}
+                        if profile.versioning is not None
+                        else {}
+                    ),
                 },
             )
             session.add(row)
@@ -320,6 +329,7 @@ class Store:
         confidence_raw = provenance.pop("confidence", {})
         known_exclusions = provenance.pop("known_exclusions", [])
         generated_at = provenance.pop("generated_at", None) or utc_now_iso()
+        versioning_raw = provenance.pop("versioning", None)
 
         meters: dict[str, Meter] = {}
         for meter_row in row.meters:
@@ -391,6 +401,9 @@ class Store:
             storage_rules=storage_rules,
             known_exclusions=known_exclusions,
             provenance=provenance,
+            versioning=(
+                VersioningCapability.model_validate(versioning_raw) if versioning_raw else None
+            ),
             integrity=Integrity(content_sha256=row.profile_sha256),
         )
         finalize_profile_integrity(profile)

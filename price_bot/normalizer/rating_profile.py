@@ -18,6 +18,7 @@ from price_bot.normalizer.models import (
     RateTier,
     RatingProfile,
     StorageRule,
+    VersioningCapability,
 )
 
 DEFAULT_UNKNOWN_EXCLUSIONS = [
@@ -140,6 +141,7 @@ def base_profile(
     confidence_reasons: list[str],
     confidence_unknowns: list[str] | None = None,
     provenance: dict[str, Any] | None = None,
+    versioning: VersioningCapability | None = None,
 ) -> RatingProfile:
     generated_at = utc_now_iso()
     profile_id = f"{provider_id}/{region}/{storage_class}"
@@ -161,7 +163,40 @@ def base_profile(
             "source_snapshot_sha256": source_snapshot_sha256,
             **(provenance or {}),
         },
+        versioning=versioning or unverified_versioning(display_name),
         integrity=Integrity(),
+    )
+
+
+def unverified_versioning(
+    display_name: str, documentation_urls: list[str] | None = None
+) -> VersioningCapability:
+    """Default block: price-bot has not verified this provider's versioning billing.
+
+    ``supported`` is false so consumers never price noncurrent versions from a guess; ``status``
+    tells them the provider may still implement versioning and the cost is simply unknown.
+    """
+    return VersioningCapability(
+        supported=False,
+        status="unverified",
+        reason=(
+            f"price-bot has not verified {display_name} object versioning billing semantics; "
+            "treat noncurrent-version and delete-marker cost as unknown"
+        ),
+        documentation_urls=documentation_urls or [],
+    )
+
+
+def unsupported_versioning(
+    reason: str, documentation_urls: list[str], notes: list[str] | None = None
+) -> VersioningCapability:
+    """The provider is verified not to implement S3 object versioning."""
+    return VersioningCapability(
+        supported=False,
+        status="unsupported",
+        reason=reason,
+        documentation_urls=documentation_urls,
+        notes=notes or [],
     )
 
 

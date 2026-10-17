@@ -125,7 +125,7 @@ One deployment pattern is a scheduled GitHub Actions workflow that runs fixture/
 
 | Provider | Source preference | Prototype coverage |
 | --- | --- | --- |
-| AWS S3 | Official AWS Price List Bulk/Query API | Fixture-driven parser with official API source path documented |
+| AWS S3 | Official AWS Price List Bulk API per-region offer files | STANDARD and STANDARD_IA in us-east-1, us-east-2, us-west-2, eu-west-1, eu-central-1 (live extraction, curated fallback) |
 | Cloudflare R2 | Official docs markdown, HTML fallback | Standard and Infrequent Access |
 | Wasabi | Official pricing HTML | Pay-as-you-go storage-only |
 | Backblaze B2 | Official pricing HTML | Pay-as-you-go and Overdrive |
@@ -134,6 +134,118 @@ One deployment pattern is a scheduled GitHub Actions workflow that runs fixture/
 | MinIO | Official product/pricing pages | Manual-required self-host profile |
 | Ceph | Official RGW docs | Manual-required self-host profile |
 | Other | Operator supplied | Manual-required profile |
+
+## AWS S3 live extraction
+
+AWS profiles are extracted from the official Price List Bulk API, one offer file per service and region:
+
+```text
+https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonS3/current/<region>/index.json
+https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSDataTransfer/current/<region>/index.json
+```
+
+Storage, request and retrieval SKUs come from `AmazonS3`. Internet egress comes from `AWSDataTransfer`
+(`DataTransfer-Out-Bytes`, "AWS Outbound" to `External`): the `DataTransfer-Out-Bytes` SKU still present in the
+`AmazonS3` offer is the $0 intra-AWS line, not internet egress.
+
+`price_bot/providers/aws_offer.py` selects exactly one SKU per price by product family, region and usage type
+(us-east-1 usage types are unprefixed, other regions carry a code such as `EUC1-`). It checks units (`GB-Mo`,
+`Requests`, `GB`), USD and contiguous tiers, and converts per-request prices to per-1,000. A missing, ambiguous or
+reshaped SKU fails the extraction rather than publishing a guess. Each download streams into a bounded spooled
+temp file (64 MiB cap; current regional offers are about 0.5 to 1.5 MB). Only the selected SKUs are kept, still
+in AWS shape, so the stored raw snapshot is about 44 KB for five regions and `price-bot normalize` can re-derive
+profiles from it.
+
+| Extracted per region | Price List source |
+| --- | --- |
+| Storage $/GB-month, all volume tiers | `TimedStorage-ByteHrs`, `TimedStorage-SIA-ByteHrs` |
+| PUT/COPY/POST/LIST per 1k (`request_write`) | `Requests-Tier1`, `Requests-SIA-Tier1` |
+| GET/HEAD/other per 1k (`request_read`) | `Requests-Tier2`, `Requests-SIA-Tier2` |
+| IA retrieval $/GB | `Retrieval-SIA` |
+| Internet egress $/GB, all volume tiers | `AWSDataTransfer` `DataTransfer-Out-Bytes` |
+
+Minimum storage duration (30 days) and minimum billable object size (128 KiB) for STANDARD_IA are not in the
+Price List; they are documented constants (`DOCUMENTED_MINIMUMS`, citing the
+[storage class guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html)).
+GLACIER_IR is not published: its request and retrieval SKUs are missing from most regional offers.
+
+Live fetching runs only with `--live` or `PRICE_BOT_LIVE=1`. If any download or extraction fails, refresh
+falls back to `CURATED_PRICES` in `aws_s3.py` and records the error in the fetch metadata. The curated table
+must equal the live extraction of the committed fixtures (`tests/fixtures/providers/aws_s3.json`,
+`tests/fixtures/aws_offers/`); `tests/test_aws_offer.py` enforces this. When AWS changes prices, regenerate
+the fixtures from a live fetch and update the curated table and its offer versions and `retrieved_at` together.
+Profile `provenance` records `source_mode` (`live_extract`, `curated` or `legacy`), `retrieved_at`, offer
+versions and URLs, and the SKUs used.
+
+Meters keep the published shape (`storage`, `request_write`, `request_read`, `egress`, `free_operations`, plus
+`retrieval` for IA). Storage and egress now carry every Price List tier; estimators price the first tier. The
+AWS 100 GB/month account-wide data transfer free tier is not modeled.
+
+## Versioning capability block
+
+Every profile has a top-level `versioning` object. The daemon uses it to price noncurrent versions and delete
+markers locally. It is additive: older consumers ignore it. `supported` is always present, and `status` tells
+"unsupported" (verified absent) apart from "unverified" (not researched yet). Both carry `supported: false`.
+
+AWS S3 (STANDARD shown; STANDARD_IA has `minimum_storage_duration_days: 30` and
+`minimum_billable_object_size_bytes: 131072`):
+
+```json
+"versioning": {
+  "supported": true,
+  "status": "supported",
+  "noncurrent_storage_billing": "storage_class_rate",
+  "delete_marker_billing": "key_name_bytes",
+  "noncurrent_expiration_lifecycle": true,
+  "lifecycle_expiration_request_charge": false,
+  "minimum_storage_duration_days": 0,
+  "minimum_billable_object_size_bytes": 0,
+  "irreversible_enable": true,
+  "documentation_urls": ["https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html", "..."],
+  "notes": ["Noncurrent versions are billed at the storage rate of their storage class.", "..."]
+}
+```
+
+Cloudflare R2 (the [S3 API compatibility page](https://developers.cloudflare.com/r2/api/s3/api/) lists
+Get/PutBucketVersioning as unimplemented and has no ListObjectVersions):
+
+```json
+"versioning": {
+  "supported": false,
+  "status": "unsupported",
+  "reason": "Cloudflare R2 does not implement S3 object versioning (PutBucketVersioning/ListObjectVersions)",
+  "documentation_urls": ["https://developers.cloudflare.com/r2/api/s3/api/"],
+  "notes": ["..."]
+}
+```
+
+All other providers publish `{"supported": false, "status": "unverified", "reason": "...", ...}` until
+their versioning billing is researched. Consumers should show that as unknown cost, not as "versioning
+unavailable".
+
+AWS profiles also map the versioning operations as additive `operation_map` keys, which older daemons never send:
+`ListObjectVersions`, `CopyObjectVersion` and `PutBucketVersioning` map to `request_write`; `GetObjectVersion`,
+`HeadObjectVersion` and `GetBucketVersioning` map to `request_read`; `DeleteObjectVersion` maps to `free_operations`.
+No meter with an existing `meter_type` is added, so older estimators cannot double count.
+
+The block is persisted inside the `price_profile.provenance` JSON (no DDL) and restored by `profile_from_row`,
+so it survives refresh, DB and publish. The regenerated `schemas/rating-profile-v1.schema.json` includes
+`VersioningCapability`.
+
+The Python estimator accepts an optional usage key `noncurrent_storage_byte_hours` (`{storage_class: byte_hours}`).
+For profiles with `supported: true` it is priced at the class's first-tier storage rate, as a `noncurrent_storage`
+breakdown line. Otherwise it is reported in `unknowns` and not priced. Inputs without the key are estimated exactly as before.
+
+## Tests
+
+```bash
+make test                      # ruff + pytest; DB-backed tests skip without DATABASE_URL
+DATABASE_URL=postgresql+psycopg://user:pw@127.0.0.1/throwaway make test
+```
+
+Under pytest `.env` is never loaded (`tests/conftest.py`), so DB-backed tests run only against an explicitly
+exported `DATABASE_URL`. Point it at a throwaway database, never the shared service database. CI
+(`.github/workflows/ci.yml`) runs ruff and the offline tests.
 
 ## Accuracy caveats
 
